@@ -149,16 +149,25 @@ class LoginKeycloakPlugin extends \RainLoop\Plugins\AbstractPlugin
 			return '';
 		}
 
-		$sEmail = $this->emailFromIdToken($sIdToken);
+		// The mailbox is resolved from the username claim (which the IdP may map,
+		// e.g. a "mail_account" attribute -> preferred_username="jakku"), scoped by
+		// username_domain. Falls back to the email claim, then to userinfo.
+		$sEmail = '';
+		$sUser = $this->claimFromIdToken($sIdToken, 'preferred_username');
+		if ($sUser) {
+			$sEmail = (false === \strpos($sUser, '@')) ? ($sDomain ? $sUser.'@'.$sDomain : $sUser) : $sUser;
+		}
+		if (!$sEmail) {
+			$sEmail = $this->claimFromIdToken($sIdToken, 'email');
+		}
 		if (!$sEmail) {
 			$aUser = \json_decode($this->httpGet($sIssuer.'/protocol/openid-connect/userinfo', $sAccessToken), true);
 			$sEmail = \is_array($aUser) ? ($aUser['email'] ?? '') : '';
-		}
-		if (!$sEmail && $sDomain) {
-			$aUser = \json_decode($this->httpGet($sIssuer.'/protocol/openid-connect/userinfo', $sAccessToken), true);
-			$sUser = \is_array($aUser) ? ($aUser['preferred_username'] ?? '') : '';
-			if ($sUser) {
-				$sEmail = false === \strpos($sUser, '@') ? $sUser.'@'.$sDomain : $sUser;
+			if (!$sEmail && $sDomain) {
+				$sU = \is_array($aUser) ? ($aUser['preferred_username'] ?? '') : '';
+				if ($sU) {
+					$sEmail = false === \strpos($sU, '@') ? $sU.'@'.$sDomain : $sU;
+				}
 			}
 		}
 		if (!$sEmail) {
@@ -178,7 +187,7 @@ class LoginKeycloakPlugin extends \RainLoop\Plugins\AbstractPlugin
 		return '';
 	}
 
-	private function emailFromIdToken(string $sIdToken) : string
+	private function claimFromIdToken(string $sIdToken, string $sClaim) : string
 	{
 		$aParts = \explode('.', $sIdToken);
 		if (\count($aParts) < 2) {
@@ -186,7 +195,8 @@ class LoginKeycloakPlugin extends \RainLoop\Plugins\AbstractPlugin
 		}
 		$sPayload = \base64_decode(\strtr($aParts[1], '-_', '+/'));
 		$aPayload = \json_decode($sPayload, true);
-		return \is_array($aPayload) ? ($aPayload['email'] ?? '') : '';
+		$mValue = \is_array($aPayload) ? ($aPayload[$sClaim] ?? '') : '';
+		return \is_string($mValue) ? $mValue : '';
 	}
 
 	private function httpPost(string $sUrl, array $aFields) : string
